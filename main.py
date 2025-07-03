@@ -27,7 +27,6 @@ try:
     print("MongoDB connection successful.")
 except Exception as e:
     print(f"!!! FATAL: MongoDB connection failed. Reason: {e}")
-    # In a real app, you might have a fallback or exit strategy.
     client = None
 
 
@@ -45,7 +44,6 @@ HOME_TEMPLATE = """
         input[type=text] { width: 90%; padding: 10px; margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; }
         button { background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; width: 95%; font-size: 16px; transition: background-color 0.2s; }
         button:hover { background-color: #0056b3; }
-        .key-display { margin-top: 20px; background-color: #e9ecef; padding: 15px; border-radius: 4px; word-wrap: break-word; text-align: left; }
         .flash { padding: 15px; margin-bottom: 20px; border-radius: 4px; }
         .flash.success { background-color: #d4edda; color: #155724; }
         .flash.error { background-color: #f8d7da; color: #721c24; }
@@ -91,12 +89,16 @@ LOGS_TEMPLATE = """
         .log-entry { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 25px; overflow: hidden; }
         .log-header { background: #f7f7f7; padding: 10px 15px; border-bottom: 1px solid #ddd; font-weight: bold; }
         .log-body { padding: 15px; }
-        h3 { color: #5a5a5a; margin-top: 0; display: flex; justify-content: space-between; align-items: center; }
-        pre { background: #2d2d2d; color: #f2f2f2; padding: 15px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; font-family: 'Courier New', Courier, monospace; }
+        .message-block { margin-bottom: 15px; }
+        .message-header { color: #5a5a5a; margin-top: 0; display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-family: monospace; font-size: 14px; }
+        pre { background: #2d2d2d; color: #f2f2f2; padding: 15px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; font-family: 'Courier New', Courier, monospace; margin-top: 5px; }
         .copy-btn { background: #6c757d; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; transition: background-color 0.2s; }
         .copy-btn:hover { background: #5a6268; }
         .logout-btn { font-size: 14px; color: #007bff; text-decoration: none; font-weight: normal; }
         .empty-log { text-align: center; color: #777; padding: 40px; }
+        .role-system { border-left: 4px solid #6f42c1; padding-left: 10px; }
+        .role-user { border-left: 4px solid #007bff; padding-left: 10px; }
+        .role-assistant { border-left: 4px solid #28a745; padding-left: 10px; }
     </style>
 </head>
 <body>
@@ -107,17 +109,18 @@ LOGS_TEMPLATE = """
             <div class="log-entry">
                 <div class="log-header">Log Timestamp: {{ log.friendly_timestamp }}</div>
                 <div class="log-body">
-                    {% if log.system_content %}
-                        <div>
-                            <h3>System Prompt <button class="copy-btn" onclick="copyToClipboard(this)">Copy</button></h3>
-                            <pre>{{ log.system_content }}</pre>
+                    {% if log.messages %}
+                        {% for message in log.messages %}
+                        <div class="message-block role-{{ message.role or 'unknown' }}">
+                            <div class="message-header">
+                                <span>ROLE: {{ message.role or 'N/A' }}</span>
+                                <button class="copy-btn" onclick="copyToClipboard(this)">Copy</button>
+                            </div>
+                            <pre>{{ message.content or '' }}</pre>
                         </div>
-                    {% endif %}
-                    {% if log.user_content %}
-                         <div>
-                            <h3>Latest User Prompt <button class="copy-btn" onclick="copyToClipboard(this)">Copy</button></h3>
-                            <pre>{{ log.user_content }}</pre>
-                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <p>No messages found in this log entry.</p>
                     {% endif %}
                 </div>
             </div>
@@ -164,16 +167,42 @@ def generate_key():
     
     users_collection.insert_one({'hashed_key': hashed_key, 'created_at': datetime.datetime.utcnow()})
     
-    # In a real production app, you would never pass the key in the template like this,
-    # but for this tool's purpose, it's a simple way to display it once.
-    key_display_page = HOME_TEMPLATE + """
-    <div class="key-display">
-        <strong>Key generated successfully!</strong><br>
-        Copy it now, you will not see it again.<br><br>
-        <code>{{ new_key }}</code>
-    </div>
+    # This renders a self-contained page to display the new key with a copy button
+    key_display_template = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8"><title>Your New API Key</title>
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f9; color: #333; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        </style>
+    </head>
+    <body>
+        <div style="font-family: sans-serif; text-align: center; padding: 40px; background: #fff; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h2>Your New API Key:</h2>
+            <p>Copy it now, you will not see it again.</p>
+            <div style="background: #e9ecef; padding: 15px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; word-wrap: break-word; text-align: left;">
+                <code id="apiKey" style="flex-grow: 1;">{{ new_key }}</code>
+                <button onclick="copyKey(this)" style="margin-left: 15px; background: #6c757d; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;">Copy</button>
+            </div>
+            <br>
+            <a href="/" style="color: #007bff; text-decoration: none;">Go back to Login</a>
+        </div>
+        <script>
+            function copyKey(button) {
+                const keyText = document.getElementById('apiKey').innerText;
+                navigator.clipboard.writeText(keyText).then(() => {
+                    button.innerText = 'Copied!';
+                    setTimeout(() => { button.innerText = 'Copy'; }, 2000);
+                }).catch(err => {
+                    console.error('Failed to copy text: ', err);
+                });
+            }
+        </script>
+    </body>
+    </html>
     """
-    return render_template_string(key_display_page, new_key=new_key)
+    return render_template_string(key_display_template, new_key=new_key)
 
 
 @app.route('/login', methods=['POST'])
@@ -187,9 +216,6 @@ def login():
         flash("API Key is required.", "error")
         return redirect(url_for('home'))
 
-    # Iterate through all users to check the key.
-    # Note: For very large user bases, a more direct lookup would be better,
-    # but this is secure and fine for thousands of users.
     users = users_collection.find()
     user_found = None
     for user in users:
@@ -198,7 +224,6 @@ def login():
             break
             
     if user_found:
-        # Store the user's database ID in the session, not the key itself
         session['user_id'] = str(user_found['_id'])
         return redirect(url_for('view_logs'))
     else:
@@ -223,36 +248,19 @@ def view_logs():
     if not client:
         return "Database is not connected.", 500
 
-    # Fetch logs only for the logged-in user, sorted newest first
     user_logs = logs_collection.find({'user_id': session['user_id']}).sort('timestamp', -1)
     
     processed_logs = []
     for log in user_logs:
         timestamp_obj = log['timestamp']
-        # Format timestamp to a more readable string
         friendly_timestamp = timestamp_obj.strftime('%A, %B %d, %Y - %I:%M:%S %p UTC')
         
+        # Get the entire messages array to be passed to the template
         messages = log.get('data', {}).get('messages', [])
         
-        system_content = ""
-        user_content = ""
-
-        # Find the system prompt
-        for msg in messages:
-            if msg.get('role') == 'system':
-                system_content = msg.get('content', '')
-                break # Found it, no need to continue
-        
-        # Find the last user prompt
-        for msg in reversed(messages):
-            if msg.get('role') == 'user':
-                user_content = msg.get('content', '')
-                break # Found it, no need to continue
-
         processed_logs.append({
             'friendly_timestamp': friendly_timestamp,
-            'system_content': system_content,
-            'user_content': user_content
+            'messages': messages
         })
         
     return render_template_string(LOGS_TEMPLATE, logs=processed_logs)
@@ -262,16 +270,13 @@ def view_logs():
 
 @app.route('/v1/chat/completions', methods=['POST', 'OPTIONS'])
 def log_and_respond():
-    # Handle CORS preflight requests sent by browsers
     if request.method == 'OPTIONS':
         return _build_cors_preflight_response()
     
-    # API Key Authentication
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
         return jsonify({"error": "Authorization header is missing or invalid. It must be in 'Bearer YOUR_KEY' format."}), 401
         
-    # Extract the key from the "Bearer <key>" string
     try:
         api_key = auth_header.split(' ')[1]
     except IndexError:
@@ -290,7 +295,6 @@ def log_and_respond():
     if not user_found:
         return jsonify({"error": "Invalid API Key"}), 401
 
-    # --- Log the request to MongoDB ---
     try:
         input_data = request.get_json()
         log_entry = {
@@ -303,7 +307,6 @@ def log_and_respond():
         print(f"!!! ERROR: Could not log request to DB. Reason: {e}")
         return jsonify({"error": "Internal server error during logging"}), 500
 
-    # --- Respond with stream or non-stream ---
     is_streaming = input_data.get("stream", False)
     if is_streaming:
         return Response(stream_generator(), headers={'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive'})
@@ -316,11 +319,8 @@ def log_and_respond():
 def _build_cors_preflight_response():
     """Builds a response for CORS preflight requests."""
     response = Response()
-    # Allow requests from any origin
     response.headers.add("Access-Control-Allow-Origin", "*")
-    # Specify allowed headers, including custom ones like Authorization
     response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization")
-    # Specify allowed HTTP methods
     response.headers.add('Access-Control-Allow-Methods', "GET,POST,OPTIONS")
     return response
 
@@ -330,7 +330,7 @@ def non_stream_response():
       "id": f"chatcmpl-{uuid.uuid4()}",
       "object": "chat.completion",
       "created": int(time.time()),
-      "model": "logger-v5",
+      "model": "logger-v6",
       "choices": [{
           "index": 0,
           "message": {
@@ -349,9 +349,8 @@ def non_stream_response():
 def stream_generator():
     """Generates a mock streaming response to satisfy clients."""
     completion_id = f"chatcmpl-{uuid.uuid4()}"
-    model_name = "logger-v5"
+    model_name = "logger-v6"
     
-    # First chunk defines the role
     chunk_one = {
       "id": completion_id, "object": "chat.completion.chunk", "created": int(time.time()), "model": model_name,
       "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]
@@ -359,7 +358,6 @@ def stream_generator():
     yield f"data: {json.dumps(chunk_one)}\n\n"
     time.sleep(0.05)
 
-    # Second chunk sends the actual content
     chunk_two = {
       "id": completion_id, "object": "chat.completion.chunk", "created": int(time.time()), "model": model_name,
       "choices": [{"index": 0, "delta": {"content": "(System: Logged successfully.)"}, "finish_reason": None}]
@@ -367,19 +365,16 @@ def stream_generator():
     yield f"data: {json.dumps(chunk_two)}\n\n"
     time.sleep(0.05)
 
-    # Third chunk signals the end of the stream
     chunk_three = {
       "id": completion_id, "object": "chat.completion.chunk", "created": int(time.time()), "model": model_name,
       "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
     }
     yield f"data: {json.dumps(chunk_three)}\n\n"
     
-    # Final message required by the spec
     yield "data: [DONE]\n\n"
 
 
 # --- APP RUNNER ---
 if __name__ == '__main__':
-    # The host and port are typically managed by the hosting platform (like Replit)
     app.run(host='0.0.0.0', port=8080)
-    
+
